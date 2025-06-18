@@ -1,0 +1,48 @@
+[project]
+name = "egile_marketing"
+version = "0.1.0"
+description = "Egile Marketing: AI-powered marketing automation via MCP server tools"
+authors = [
+    {name = "Jean-Baptiste Poullet",email = "jeanbaptistepoullet@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "azure-identity>=1.15.0",
+    "azure-keyvault-secrets>=4.8.0",
+    "openai>=1.12.0",
+    "fastmcp>=0.2.0",
+    "pydantic>=2.5.0",
+    "asyncio-throttle>=1.0.2",
+    "tenacity>=8.2.3",
+    "structlog>=23.2.0",
+    "httpx>=0.26.0",
+    "python-dotenv>=1.0.0",
+    "typing-extensions>=4.9.0",
+    "jinja2>=3.1.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "aiofiles>=23.2.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "flake8>=6.0.0"
+]
+
+[project.scripts]
+egile-marketing-server = "egile_marketing.server:main"
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
