@@ -117,7 +117,7 @@ class ContentGenerator:
             response = await self.openai_client.chat_completion(
                 messages=messages,
                 # Use client's default model instead of config model
-                # model=self.config.model,  
+                # model=self.config.model,
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens,
             )
