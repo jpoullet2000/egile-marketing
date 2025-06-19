@@ -72,9 +72,12 @@ class MarketingAgent:
         length: str = "medium",
         keywords: Optional[List[str]] = None,
         brand_guidelines: Optional[Dict[str, Any]] = None,
+        max_iterations: int = 3,
+        quality_threshold: float = 7.0,
+        enable_iterative_improvement: bool = True,
     ) -> Dict[str, Any]:
         """
-        Generate marketing content using AI.
+        Generate marketing content with iterative improvement capability.
 
         Args:
             content_type: Type of content to generate
@@ -84,55 +87,130 @@ class MarketingAgent:
             length: Content length
             keywords: SEO keywords to include
             brand_guidelines: Brand guidelines to follow
+            max_iterations: Maximum number of improvement iterations (default: 3)
+            quality_threshold: Minimum quality score to accept (default: 7.0)
+            enable_iterative_improvement: Enable iterative refinement (default: True)
 
         Returns:
-            Generated content with metadata
+            Generated content with metadata including iteration history
         """
         try:
             tone = tone or self.config.brand_voice
-
-            # Build context-aware prompt
-            system_prompt = self._build_content_generation_prompt(
-                content_type, target_audience, tone, brand_guidelines
-            )
-
-            user_prompt = self._build_user_content_prompt(brief, length, keywords)
+            iteration_history = []
+            best_content = None
+            best_score = 0.0
 
             logger.info(
                 "Generating marketing content",
                 content_type=content_type,
                 target_audience=target_audience,
                 tone=tone,
+                max_iterations=max_iterations,
+                quality_threshold=quality_threshold,
             )
 
-            # Generate content using OpenAI
-            content = await self.openai_client.generate_marketing_content(
-                content_type=content_type,
-                brief=brief,
-                target_audience=target_audience,
-                tone=tone,
-                length=length,
-                # Use client's default model
-            )
+            for iteration in range(max_iterations):
+                logger.info(
+                    "Content generation iteration",
+                    iteration=iteration + 1,
+                    max_iterations=max_iterations,
+                )
 
-            # Score content effectiveness
-            content_score = await self.openai_client.score_content_effectiveness(
-                content=content,
-                content_type=content_type,
-                target_audience=target_audience,
-                # Use client's default model
-            )
+                # Build context-aware prompt with improvement feedback
+                improvement_context = ""
+                if iteration > 0 and best_content:
+                    improvement_context = f"""
+Previous iteration produced content with score {best_score:.1f}/10.
+Please improve upon this content:
+
+Previous content: {best_content}
+
+Focus on addressing these areas for improvement:
+- Higher engagement potential
+- Better audience alignment
+- Stronger call-to-action
+- Enhanced clarity and impact
+"""
+
+                # Generate content using OpenAI
+                current_content = await self.openai_client.generate_marketing_content(
+                    content_type=content_type,
+                    brief=f"{brief}\n{improvement_context}",
+                    target_audience=target_audience,
+                    tone=tone,
+                    length=length,
+                    # Use client's default model
+                )
+
+                # Score content effectiveness
+                content_score_result = (
+                    await self.openai_client.score_content_effectiveness(
+                        content=current_content,
+                        content_type=content_type,
+                        target_audience=target_audience,
+                        # Use client's default model
+                    )
+                )
+
+                # Extract numeric score from the result
+                current_score = await self._extract_numeric_score(content_score_result)
+
+                # Track iteration
+                iteration_data = {
+                    "iteration": iteration + 1,
+                    "content": current_content,
+                    "score": current_score,
+                    "score_details": content_score_result,
+                    "generated_at": datetime.now().isoformat(),
+                }
+                iteration_history.append(iteration_data)
+
+                logger.info(
+                    "Content iteration completed",
+                    iteration=iteration + 1,
+                    score=current_score,
+                    content_length=len(current_content),
+                )
+
+                # Update best content if this iteration is better
+                if current_score > best_score:
+                    best_content = current_content
+                    best_score = current_score
+
+                # Check if we've reached the quality threshold
+                if (
+                    not enable_iterative_improvement
+                    or current_score >= quality_threshold
+                ):
+                    logger.info(
+                        "Quality threshold reached",
+                        score=current_score,
+                        threshold=quality_threshold,
+                        iterations_used=iteration + 1,
+                    )
+                    break
+
+                # If not iterative improvement, stop after first iteration
+                if not enable_iterative_improvement:
+                    break
+
+            # Use best content found across all iterations
+            final_content = best_content if best_content else current_content
+            final_score = best_score if best_content else current_score
 
             result = {
-                "content": content,
+                "content": final_content,
                 "content_type": content_type,
                 "target_audience": target_audience,
                 "tone": tone,
                 "length": length,
                 "keywords": keywords or [],
-                "effectiveness_score": content_score,
+                "effectiveness_score": final_score,
+                "iterations_used": len(iteration_history),
+                "iteration_history": iteration_history,
+                "quality_threshold": quality_threshold,
                 "generated_at": datetime.now().isoformat(),
-                "agent_version": "1.0",
+                "agent_version": "1.1",
             }
 
             # Cache result for optimization
@@ -447,6 +525,70 @@ Please create engaging, high-quality content that meets these requirements."""
             },
             "retrieved_at": datetime.now().isoformat(),
         }
+
+    async def _extract_numeric_score(self, score_result: Dict[str, Any]) -> float:
+        """
+        Extract a numeric score from the content effectiveness result.
+
+        Args:
+            score_result: Result from score_content_effectiveness
+
+        Returns:
+            Numeric score between 0.0 and 10.0
+        """
+        try:
+            # If the result already contains a numeric score
+            if isinstance(score_result, dict) and "score" in score_result:
+                return float(score_result["score"])
+
+            # Try to parse from raw_analysis text
+            if "raw_analysis" in score_result:
+                analysis_text = score_result["raw_analysis"]
+
+                # Look for patterns like "Overall: 8/10" or "Score: 7.5"
+                import re
+
+                # Pattern for "X/10" format
+                match = re.search(r"(\d+(?:\.\d+)?)\s*/\s*10", analysis_text)
+                if match:
+                    return float(match.group(1))
+
+                # Pattern for "Score: X" format
+                match = re.search(
+                    r"(?:score|overall|effectiveness):\s*(\d+(?:\.\d+)?)",
+                    analysis_text,
+                    re.IGNORECASE,
+                )
+                if match:
+                    score = float(match.group(1))
+                    # Normalize to 0-10 scale if needed
+                    if score <= 1.0:
+                        score *= 10
+                    return min(score, 10.0)
+
+                # Look for any number between 1-10
+                numbers = re.findall(
+                    r"\b([1-9](?:\.\d+)?|10(?:\.0+)?)\b", analysis_text
+                )
+                if numbers:
+                    # Take the first reasonable score found
+                    for num in numbers:
+                        score = float(num)
+                        if 1.0 <= score <= 10.0:
+                            return score
+
+            # Default fallback score
+            logger.warning(
+                "Could not extract numeric score, using default 5.0",
+                score_result=score_result,
+            )
+            return 5.0
+
+        except Exception as e:
+            logger.warning(
+                f"Error extracting numeric score: {e}", score_result=score_result
+            )
+            return 5.0
 
     async def close(self):
         """Clean up resources."""
